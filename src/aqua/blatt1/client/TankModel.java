@@ -15,95 +15,139 @@ import aqua.blatt1.common.msgtypes.NeighborUpdate;
 
 public class TankModel extends Observable implements Iterable<FishModel> {
 
-	public static final int WIDTH = 600;
-	public static final int HEIGHT = 350;
-	protected static final int MAX_FISHIES = 5;
-	protected static final Random rand = new Random();
-	protected volatile String id;
-	protected final Set<FishModel> fishies;
-	protected int fishCounter = 0;
-	protected final ClientCommunicator.ClientForwarder forwarder;
-	protected InetSocketAddress leftNeighbor;
-	protected InetSocketAddress rightNeighbor;
+    public enum recordingMode {
+        IDLE, LEFT, RIGTH, BOTH
+    }
 
-	public TankModel(ClientCommunicator.ClientForwarder forwarder) {
-		this.fishies = Collections.newSetFromMap(new ConcurrentHashMap<FishModel, Boolean>());
-		this.forwarder = forwarder;
-	}
+    public static final int WIDTH = 600;
 
-	synchronized void onRegistration(String id) {
-		this.id = id;
-		newFish(WIDTH - FishModel.getXSize(), rand.nextInt(HEIGHT - FishModel.getYSize()));
-	}
+    public static final int HEIGHT = 350;
 
-	public synchronized void newFish(int x, int y) {
-		if (fishies.size() < MAX_FISHIES) {
-			x = x > WIDTH - FishModel.getXSize() - 1 ? WIDTH - FishModel.getXSize() - 1 : x;
-			y = y > HEIGHT - FishModel.getYSize() ? HEIGHT - FishModel.getYSize() : y;
+    protected static final int MAX_FISHIES = 5;
 
-			FishModel fish = new FishModel("fish" + (++fishCounter) + "@" + getId(), x, y,
-					rand.nextBoolean() ? Direction.LEFT : Direction.RIGHT);
+    protected static final Random rand = new Random();
 
-			fishies.add(fish);
-		}
-	}
+    protected volatile String id;
 
-	synchronized void receiveFish(FishModel fish) {
-		fish.setToStart();
-		fishies.add(fish);
-	}
+    protected final Set<FishModel> fishies;
 
-	public String getId() {
-		return id;
-	}
+    protected int fishCounter = 0;
 
-	public synchronized int getFishCounter() {
-		return fishCounter;
-	}
+    protected final ClientCommunicator.ClientForwarder forwarder;
+    
+    protected final ClientCommunicator.ClientReceiver reciever;
 
-	public synchronized Iterator<FishModel> iterator() {
-		return fishies.iterator();
-	}
+    protected InetSocketAddress leftNeighbor;
 
-	private synchronized void updateFishies() {
-		for (Iterator<FishModel> it = iterator(); it.hasNext();) {
-			FishModel fish = it.next();
+    protected InetSocketAddress rightNeighbor;
 
-			fish.update();
+    public recordingMode recordingState;
 
-			if (fish.hitsEdge())
-				forwarder.handOff(fish);
+    public int state;
 
-			if (fish.disappears())
-				it.remove();
-		}
-	}
+    public TankModel(ClientCommunicator.ClientForwarder forwarder) {
+        this.fishies = Collections.newSetFromMap(new ConcurrentHashMap<FishModel, Boolean>());
+        this.forwarder = forwarder;
+        this.recordingState = recordingMode.IDLE;
+        reciever = null;
+    }
 
-	private synchronized void update() {
-		updateFishies();
-		setChanged();
-		notifyObservers();
-	}
+    synchronized void onRegistration(String id) {
+        this.id = id;
+        newFish(WIDTH - FishModel.getXSize(), rand.nextInt(HEIGHT - FishModel.getYSize()));
+    }
 
-	protected void run() {
-		forwarder.register();
+    public synchronized void newFish(int x, int y) {
+        if (fishies.size() < MAX_FISHIES) {
+            x = x > WIDTH - FishModel.getXSize() - 1 ? WIDTH - FishModel.getXSize() - 1 : x;
+            y = y > HEIGHT - FishModel.getYSize() ? HEIGHT - FishModel.getYSize() : y;
 
-		try {
-			while (!Thread.currentThread().isInterrupted()) {
-				update();
-				TimeUnit.MILLISECONDS.sleep(10);
-			}
-		} catch (InterruptedException consumed) {
-			// allow method to terminate
-		}
-	}
+            FishModel fish =
+                new FishModel("fish" + (++fishCounter) + "@" + getId(), x, y, rand.nextBoolean() ? Direction.LEFT : Direction.RIGHT);
 
-	public synchronized void finish() {
-		forwarder.deregister(id);
-	}
+            fishies.add(fish);
+        }
+    }
 
-	public void updateNeighbors(NeighborUpdate msg) {
-		this.leftNeighbor = msg.leftNeighborAdress;
-		this.rightNeighbor = msg.rightNeighborAdress;
-	}
+    synchronized void receiveFish(FishModel fish) {
+        fish.setToStart();
+        fishies.add(fish);
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public synchronized int getFishCounter() {
+        return fishCounter;
+    }
+
+    public synchronized Iterator<FishModel> iterator() {
+        return fishies.iterator();
+    }
+
+    private synchronized void updateFishies() {
+        for (Iterator<FishModel> it = iterator(); it.hasNext(); ) {
+            FishModel fish = it.next();
+
+            fish.update();
+
+            if (fish.hitsEdge())
+                forwarder.handOff(fish);
+
+            if (fish.disappears())
+                it.remove();
+        }
+    }
+
+    private synchronized void update() {
+        updateFishies();
+        setChanged();
+        notifyObservers();
+    }
+
+    protected void run() {
+        forwarder.register();
+
+        try {
+            while (!Thread.currentThread().isInterrupted()) {
+                update();
+                TimeUnit.MILLISECONDS.sleep(10);
+            }
+        } catch (InterruptedException consumed) {
+            // allow method to terminate
+        }
+    }
+
+    public synchronized void finish() {
+        forwarder.deregister(id);
+    }
+
+    public void updateNeighbors(NeighborUpdate msg) {
+        this.leftNeighbor = msg.leftNeighborAdress;
+        this.rightNeighbor = msg.rightNeighborAdress;
+    }
+
+    public void initiateSnapshot() {
+        // safe lokal State
+        updateState();
+        // record all Input channels
+        recordEntry(leftNeighbor);
+        recordEntry(rightNeighbor);
+        // send marker
+        sendMarker(leftNeighbor);
+        sendMarker(rightNeighbor);
+    }
+
+    private void recordEntry(InetSocketAddress client) {
+        
+    }
+
+    private void sendMarker(InetSocketAddress client) {
+
+    }
+
+    private void updateState() {
+        state = fishies.size();
+    }
 }
